@@ -12,15 +12,18 @@ const bcrypt = require('bcryptjs');
 const { generateInviteCode } = require('./utils/helpers');
 const { generalLimiter } = require('./middleware/ratelimit');
 
+const app = express();
+const server = http.createServer(app);
 const io = new Server(server, {
   cors: { origin: '*', methods: ['GET', 'POST'] },
   transports: ['polling'],
 });
 
-// Database
-const db = new Pool({ connectionString: process.env.DATABASE_URL });
+const db = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+});
 
-// Session store
 const sessionMiddleware = session({
   store: new pgSession({ pool: db, tableName: 'session', createTableIfMissing: true }),
   secret: process.env.SESSION_SECRET || 'sigma-chat-secret',
@@ -34,22 +37,18 @@ const sessionMiddleware = session({
   },
 });
 
-// Middleware
 app.set('trust proxy', 1);
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(sessionMiddleware);
 app.use(generalLimiter);
 
-// Static files
 app.use(express.static(path.join(__dirname, 'public')));
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+app.use('/uploads', express.static(path.join('/tmp', 'uploads')));
 
-// Share session with Socket.IO
 const wrap = middleware => (socket, next) => middleware(socket.request, {}, next);
 io.use(wrap(sessionMiddleware));
 
-// Routes
 const authRoutes = require('./routes/auth')(db);
 const serverRoutes = require('./routes/servers')(db, io);
 const messageRoutes = require('./routes/messages')(db, io);
@@ -68,35 +67,22 @@ app.use('/api/dms', dmRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/store', storeRoutes);
 
-// SPA fallback
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// Socket.IO
 io.on('connection', (socket) => {
-  const session = socket.request.session;
-  if (!session || !session.userId) return socket.disconnect();
-  const userId = session.userId;
+  const sess = socket.request.session;
+  if (!sess || !sess.userId) return socket.disconnect();
+  const userId = sess.userId;
 
   socket.join(`user:${userId}`);
   db.query('UPDATE users SET status=$1, last_seen=NOW() WHERE id=$2', ['online', userId]).catch(() => {});
 
-  socket.on('join_server', (serverId) => {
-    socket.join(`server:${serverId}`);
-  });
-
-  socket.on('join_channel', (channelId) => {
-    socket.join(`channel:${channelId}`);
-  });
-
-  socket.on('leave_channel', (channelId) => {
-    socket.leave(`channel:${channelId}`);
-  });
-
-  socket.on('join_group', (groupId) => {
-    socket.join(`group:${groupId}`);
-  });
+  socket.on('join_server', (serverId) => socket.join(`server:${serverId}`));
+  socket.on('join_channel', (channelId) => socket.join(`channel:${channelId}`));
+  socket.on('leave_channel', (channelId) => socket.leave(`channel:${channelId}`));
+  socket.on('join_group', (groupId) => socket.join(`group:${groupId}`));
 
   socket.on('typing_start', async ({ channelId }) => {
     try {
@@ -104,7 +90,7 @@ io.on('connection', (socket) => {
       if (!ch.rows[0]) return;
       const member = await db.query('SELECT 1 FROM server_members WHERE server_id=$1 AND user_id=$2', [ch.rows[0].server_id, userId]);
       if (!member.rows[0]) return;
-      socket.to(`channel:${channelId}`).emit('user_typing', { userId, username: session.username, channelId });
+      socket.to(`channel:${channelId}`).emit('user_typing', { userId, username: sess.username, channelId });
     } catch (_) {}
   });
 
@@ -128,7 +114,6 @@ io.on('connection', (socket) => {
   });
 });
 
-// Seed admin user on startup
 async function seedAdmin() {
   try {
     const existing = await db.query('SELECT id FROM users WHERE username=$1', ['Admin']);
@@ -139,17 +124,21 @@ async function seedAdmin() {
          VALUES ($1,$2,$3,$4,$5,NOW(),$6,$7,$8)`,
         ['Admin', 'Admin', 'admin@sigmachat.local', hash, true, true, true, true]
       );
-      console.log('Admin user created: Admin / whatthesigma');
+      console.log('Admin user created.');
     }
   } catch (err) {
     console.error('Admin seed error:', err.message);
   }
 }
 
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, async () => {
-  console.log(`Sigma Chat running on http://localhost:${PORT}`);
-  await seedAdmin();
-});
-
-module.exports = { app, server, io };
+if (process.env.VERCEL) {
+  seedAdmin().catch(console.error);
+  module.exports = app;
+} else {
+  const PORT = process.env.PORT || 3000;
+  server.listen(PORT, async () => {
+    console.log(`Sigma Chat running on http://localhost:${PORT}`);
+    await seedAdmin();
+  });
+  module.exports = { app, server, io };
+}
