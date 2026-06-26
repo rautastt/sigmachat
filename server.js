@@ -8,7 +8,7 @@ const session = require('express-session');
 const pgSession = require('connect-pg-simple')(session);
 const { Pool } = require('pg');
 const path = require('path');
-const bcrypt = require('bcrypt');
+const bcrypt = require('bcryptjs');
 const { generateInviteCode } = require('./utils/helpers');
 const { generalLimiter } = require('./middleware/ratelimit');
 
