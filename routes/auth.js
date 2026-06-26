@@ -1,7 +1,7 @@
 'use strict';
 const express = require('express');
 const router = express.Router();
-const bcrypt = require('bcrypt');
+const bcrypt = require('bcryptjs');
 const { body, validationResult } = require('express-validator');
 const { generateToken, generateInviteCode, calcLevel } = require('../utils/helpers');
 const { sendVerificationEmail, sendPasswordResetEmail, sendEmailChangeVerification } = require('../utils/email');
