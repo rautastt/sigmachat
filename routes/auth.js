@@ -14,7 +14,7 @@ module.exports = (db) => {
   // Register
   router.post('/register', authLimiter, [
     body('username').trim().isLength({ min: 2, max: 32 }).matches(/^[a-zA-Z0-9_.-]+$/),
-    body('email').isEmail().normalizeEmail(),
+    body('email').isEmail(),
     body('password').isLength({ min: 6, max: 128 }),
   ], async (req, res) => {
     const errors = validationResult(req);
@@ -155,7 +155,7 @@ module.exports = (db) => {
 
   // Forgot password
   router.post('/forgot-password', authLimiter, [
-    body('email').isEmail().normalizeEmail(),
+    body('email').isEmail(),
   ], async (req, res) => {
     try {
       const result = await db.query('SELECT id, username, email FROM users WHERE email=$1', [req.body.email]);
@@ -209,7 +209,7 @@ module.exports = (db) => {
 
   // Change email
   router.post('/change-email', requireAuth, [
-    body('email').isEmail().normalizeEmail(),
+    body('email').isEmail(),
     body('password').notEmpty(),
   ], async (req, res) => {
     try {
