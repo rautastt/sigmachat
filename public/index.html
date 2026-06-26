@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sigma Chat</title>
+  <link rel="stylesheet" href="/css/style.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+</head>
+<body class="theme-default">
+
+<!-- Auth Screen -->
+<div id="auth-screen" class="auth-screen">
+  <div class="auth-container">
+    <div class="auth-logo">
+      <div class="auth-logo-icon">Σ</div>
+      <h1>Sigma Chat</h1>
+      <p>Community for the disciplined</p>
+    </div>
+    <div class="auth-card">
+      <div class="auth-tabs">
+        <button class="auth-tab active" data-tab="login">Sign In</button>
+        <button class="auth-tab" data-tab="register">Register</button>
+        <button class="auth-tab" data-tab="forgot">Forgot Password</button>
+      </div>
+
+      <!-- Login -->
+      <form id="login-form" class="auth-form active">
+        <div class="field-group">
+          <label>Username or Email</label>
+          <input type="text" id="login-username" placeholder="Enter username or email" required />
+        </div>
+        <div class="field-group">
+          <label>Password</label>
+          <input type="password" id="login-password" placeholder="Enter password" required />
+        </div>
+        <div class="auth-error" id="login-error"></div>
+        <button type="submit" class="btn-primary btn-full">Sign In</button>
+      </form>
+
+      <!-- Register -->
+      <form id="register-form" class="auth-form">
+        <div class="field-group">
+          <label>Username</label>
+          <input type="text" id="reg-username" placeholder="Choose a username" maxlength="32" required />
+        </div>
+        <div class="field-group">
+          <label>Email</label>
+          <input type="email" id="reg-email" placeholder="Enter your email" required />
+        </div>
+        <div class="field-group">
+          <label>Password</label>
+          <input type="password" id="reg-password" placeholder="At least 6 characters" required />
+        </div>
+        <div class="auth-error" id="register-error"></div>
+        <button type="submit" class="btn-primary btn-full">Create Account</button>
+      </form>
+
+      <!-- Forgot Password -->
+      <form id="forgot-form" class="auth-form">
+        <div class="field-group">
+          <label>Email Address</label>
+          <input type="email" id="forgot-email" placeholder="Enter your email" required />
+        </div>
+        <div class="auth-error" id="forgot-error"></div>
+        <div class="auth-success" id="forgot-success"></div>
+        <button type="submit" class="btn-primary btn-full">Send Reset Link</button>
+      </form>
+
+      <!-- Reset Password (shown via URL) -->
+      <form id="reset-form" class="auth-form">
+        <h3 style="margin-bottom:16px;color:var(--text-primary)">Reset Password</h3>
+        <input type="hidden" id="reset-token" />
+        <div class="field-group">
+          <label>New Password</label>
+          <input type="password" id="reset-password" placeholder="New password" required />
+        </div>
+        <div class="auth-error" id="reset-error"></div>
+        <div class="auth-success" id="reset-success"></div>
+        <button type="submit" class="btn-primary btn-full">Reset Password</button>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- Verified Banner -->
+<div id="verified-banner" class="verified-banner hidden">
+  <span>✓ Email verified successfully!</span>
+  <button onclick="this.parentElement.classList.add('hidden')">×</button>
+</div>
+
+<!-- Email Verification Bar -->
+<div id="verify-bar" class="verify-bar hidden">
+  <span>Please verify your email address. <button class="link-btn" onclick="resendVerification()">Resend email</button></span>
+</div>
+
+<!-- Main App -->
+<div id="app" class="app hidden">
+
+  <!-- Server Dock -->
+  <div class="server-dock" id="server-dock">
+    <div class="dock-home dock-item active" id="dock-home" title="Home" onclick="showHome()">
+      <span>Σ</span>
+    </div>
+    <div class="dock-separator"></div>
+    <div id="dock-servers"></div>
+    <div class="dock-separator"></div>
+    <div class="dock-item dock-add" title="Add Server" onclick="showAddServer()">
+      <span>+</span>
+    </div>
+    <div class="dock-item dock-explore" title="Explore Servers" onclick="showExplore()">
+      <span>⊕</span>
+    </div>
+    <div class="dock-separator"></div>
+    <div class="dock-item dock-store" title="Store" onclick="showStore()">
+      <span>🏪</span>
+    </div>
+  </div>
+
+  <!-- Sidebar -->
+  <div class="sidebar" id="sidebar">
+    <!-- Home sidebar: DMs, Friends -->
+    <div id="home-sidebar" class="sidebar-content">
+      <div class="sidebar-header">
+        <input type="text" class="search-bar" id="user-search" placeholder="Find or start conversation" oninput="searchUsers(this.value)" />
+      </div>
+      <div class="sidebar-section">
+        <div class="sidebar-section-header" onclick="toggleFriends()">FRIENDS</div>
+        <div id="friends-list"></div>
+      </div>
+      <div class="sidebar-section">
+        <div class="sidebar-section-header">DIRECT MESSAGES</div>
+        <div id="dm-list"></div>
+      </div>
+      <div id="search-results" class="search-results hidden"></div>
+    </div>
+
+    <!-- Server sidebar: Channels -->
+    <div id="server-sidebar" class="sidebar-content hidden">
+      <div class="server-header" id="server-header">
+        <span id="server-name-header"></span>
+        <button class="icon-btn" onclick="showServerSettings()" title="Settings">⚙</button>
+      </div>
+      <div id="channel-list"></div>
+      <button class="btn-sm btn-secondary" style="margin:8px;" onclick="showAddChannel()">+ Add Channel</button>
+    </div>
+  </div>
+
+  <!-- Main Content -->
+  <div class="main-content" id="main-content">
+
+    <!-- Home / Friends view -->
+    <div id="home-view" class="view">
+      <div class="view-header">
+        <span class="view-title">Home</span>
+      </div>
+      <div class="home-content">
+        <div class="home-hero">
+          <div class="home-logo">Σ</div>
+          <h2>Welcome to Sigma Chat</h2>
+          <p>Select a friend or server to start chatting</p>
+        </div>
+        <div class="friend-requests-section" id="friend-requests-section"></div>
+      </div>
+    </div>
+
+    <!-- Chat view -->
+    <div id="chat-view" class="view hidden">
+      <div class="chat-header" id="chat-header">
+        <div class="chat-header-left">
+          <span class="chat-channel-icon">#</span>
+          <span id="chat-channel-name"></span>
+          <span id="chat-channel-topic" class="chat-topic"></span>
+        </div>
+        <div class="chat-header-right">
+          <button class="icon-btn" title="Pinned Messages" onclick="showPinned()">📌</button>
+          <button class="icon-btn" title="Members" onclick="toggleMemberList()">👥</button>
+        </div>
+      </div>
+      <div class="chat-body" id="chat-body">
+        <div class="messages-container" id="messages-container">
+          <button class="load-more-btn" id="load-more-btn" onclick="loadMoreMessages()">Load older messages</button>
+        </div>
+        <div class="typing-indicator" id="typing-indicator"></div>
+      </div>
+      <div class="chat-input-area">
+        <div class="chat-input-wrap">
+          <button class="attach-btn" title="Attachment">+</button>
+          <textarea id="message-input" placeholder="Message #general" rows="1" onkeydown="handleMessageKey(event)" oninput="handleTyping()"></textarea>
+          <button class="send-btn" onclick="sendMessage()">➤</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- DM view -->
+    <div id="dm-view" class="view hidden">
+      <div class="chat-header" id="dm-header">
+        <div class="chat-header-left">
+          <div class="avatar-sm" id="dm-partner-avatar"></div>
+          <span id="dm-partner-name"></span>
+        </div>
+      </div>
+      <div class="chat-body" id="dm-body">
+        <div class="messages-container" id="dm-messages-container"></div>
+        <div class="typing-indicator" id="dm-typing-indicator"></div>
+      </div>
+      <div class="chat-input-area">
+        <div class="chat-input-wrap">
+          <textarea id="dm-message-input" placeholder="Message" rows="1" onkeydown="handleDmKey(event)"></textarea>
+          <button class="send-btn" onclick="sendDm()">➤</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Store view -->
+    <div id="store-view" class="view hidden">
+      <div class="view-header">
+        <span class="view-title">🏪 Sigma Store</span>
+      </div>
+      <div id="store-content" class="store-content"></div>
+    </div>
+
+    <!-- Admin view -->
+    <div id="admin-view" class="view hidden">
+      <div class="view-header">
+        <span class="view-title">⚙ Admin Panel</span>
+        <div class="admin-tabs">
+          <button class="admin-tab active" onclick="showAdminTab('users')">Users</button>
+          <button class="admin-tab" onclick="showAdminTab('logs')">Logs</button>
+          <button class="admin-tab" onclick="showAdminTab('bans')">Bans</button>
+        </div>
+      </div>
+      <div id="admin-content" class="admin-content"></div>
+    </div>
+
+  </div>
+
+  <!-- Member List -->
+  <div class="member-list" id="member-list">
+    <div class="member-list-header">Members</div>
+    <div id="member-list-content"></div>
+  </div>
+
+  <!-- Profile Bar (bottom) -->
+  <div class="profile-bar" id="profile-bar">
+    <div class="profile-bar-user" onclick="showSettings()">
+      <div class="avatar-sm" id="profile-avatar"></div>
+      <div class="profile-bar-info">
+        <div class="profile-bar-name" id="profile-name"></div>
+        <div class="profile-bar-status" id="profile-status"></div>
+      </div>
+    </div>
+    <div class="profile-bar-actions">
+      <button class="icon-btn" title="Notifications" onclick="showNotifications()">🔔</button>
+      <button class="icon-btn" title="Settings" onclick="showSettings()">⚙</button>
+      <button class="icon-btn" title="Admin" id="admin-btn" onclick="showAdmin()" style="display:none">🛡</button>
+    </div>
+  </div>
+
+</div>
+
+<!-- Modals -->
+<div class="modal-overlay hidden" id="modal-overlay" onclick="closeModal(event)">
+  <div class="modal" id="modal">
+    <button class="modal-close" onclick="closeModal()">×</button>
+    <div class="modal-body" id="modal-body"></div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="toast-container"></div>
+
+<!-- Scripts -->
+<script src="/socket.io/socket.io.js"></script>
+<script src="/js/app.js"></script>
+<script src="/js/auth.js"></script>
+<script src="/js/socket.js"></script>
+<script src="/js/chat.js"></script>
+<script src="/js/ui.js"></script>
+<script src="/js/store.js"></script>
+<script src="/js/admin.js"></script>
+</body>
+</html>
