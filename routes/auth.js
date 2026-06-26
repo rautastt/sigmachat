@@ -216,7 +216,7 @@ module.exports = (db) => {
       const result = await db.query('SELECT password_hash, username FROM users WHERE id=$1', [req.session.userId]);
       const match = await bcrypt.compare(req.body.password, result.rows[0].password_hash);
       if (!match) return res.status(401).json({ error: 'Password is incorrect.' });
-      const exists = await db.query('SELECT id FROM users WHERE email=$1', [req.body.email]);
+      const exists = await db.query('SELECT id FROM users WHERE email=$1 AND id!=$2', [req.body.email, req.session.userId]);
       if (exists.rows.length > 0) return res.status(409).json({ error: 'Email already in use.' });
       const token = generateToken();
       const expires = new Date(Date.now() + 24 * 60 * 60 * 1000);
