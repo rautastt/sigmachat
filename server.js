@@ -12,10 +12,9 @@ const bcrypt = require('bcrypt');
 const { generateInviteCode } = require('./utils/helpers');
 const { generalLimiter } = require('./middleware/ratelimit');
 
-const app = express();
-const server = http.createServer(app);
 const io = new Server(server, {
   cors: { origin: '*', methods: ['GET', 'POST'] },
+  transports: ['polling'],
 });
 
 // Database
