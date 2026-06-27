@@ -41,7 +41,7 @@ CREATE TABLE IF NOT EXISTS session (
   sid VARCHAR NOT NULL COLLATE "default",
   sess JSON NOT NULL,
   expire TIMESTAMP(6) NOT NULL,
-  CONSTRAINT session_pkey PRIMARY KEY (sid) NOT DEFERRABLE INITIALLY IMMEDIATE
+  CONSTRAINT session_pkey PRIMARY KEY (sid) DEFERRABLE INITIALLY IMMEDIATE
 );
 CREATE INDEX IF NOT EXISTS IDX_session_expire ON session(expire);
 
@@ -191,12 +191,13 @@ CREATE TABLE IF NOT EXISTS store_items (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- User Purchases
+-- User Purchases (with UNIQUE constraint to prevent duplicates)
 CREATE TABLE IF NOT EXISTS user_purchases (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   item_id UUID NOT NULL REFERENCES store_items(id) ON DELETE CASCADE,
-  purchased_at TIMESTAMPTZ DEFAULT NOW()
+  purchased_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(user_id, item_id)
 );
 
 -- Subscriptions (Rail)

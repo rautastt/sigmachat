@@ -9,7 +9,7 @@ module.exports = (db) => {
   router.get('/', requireAuth, async (req, res) => {
     try {
       const result = await db.query('SELECT * FROM store_items WHERE active=TRUE ORDER BY type, price');
-      const purchases = await db.query('SELECT item_id FROM user_purchases WHERE user_id=$1', [req.session.userId]);
+      const purchases = await db.query('SELECT DISTINCT item_id FROM user_purchases WHERE user_id=$1', [req.session.userId]);
       const owned = new Set(purchases.rows.map(r => r.item_id));
       const items = result.rows.map(item => ({ ...item, owned: owned.has(item.id) }));
       res.json({ items });
@@ -30,9 +30,13 @@ module.exports = (db) => {
       const u = user.rows[0];
       if (u.points < it.price) return res.status(402).json({ error: 'Not enough points.' });
 
+      // Deduct points
       await db.query('UPDATE users SET points=points-$1 WHERE id=$2', [it.price, req.session.userId]);
+      
+      // Add purchase record
       await db.query('INSERT INTO user_purchases (user_id, item_id) VALUES ($1,$2)', [req.session.userId, it.id]);
 
+      // Apply the item effect
       const data = it.data || {};
       if (it.type === 'rail') {
         await db.query('UPDATE users SET badge_rail=TRUE WHERE id=$1', [req.session.userId]);
@@ -46,8 +50,10 @@ module.exports = (db) => {
         await db.query('UPDATE users SET theme=$1 WHERE id=$2', [data.theme, req.session.userId]);
       }
 
-      res.json({ success: true, newPoints: u.points - it.price });
+      const newPoints = u.points - it.price;
+      res.json({ success: true, newPoints });
     } catch (err) {
+      console.error(err);
       res.status(500).json({ error: 'Failed.' });
     }
   });

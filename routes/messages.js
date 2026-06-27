@@ -24,13 +24,13 @@ module.exports = (db, io) => {
 
       let query, params;
       if (before) {
-        query = `SELECT m.*, u.username, u.display_name, u.avatar, u.badge_blue, u.badge_gold, u.badge_rail, u.is_admin, u.name_color
+        query = `SELECT m.*, u.username, u.display_name, u.avatar, u.badge_blue, u.badge_gold, u.badge_rail, u.is_admin, u.name_color, u.chat_effect
                  FROM messages m JOIN users u ON u.id=m.user_id
                  WHERE m.channel_id=$1 AND m.created_at < (SELECT created_at FROM messages WHERE id=$2)
                  ORDER BY m.created_at DESC LIMIT $3`;
         params = [req.params.channelId, before, limit];
       } else {
-        query = `SELECT m.*, u.username, u.display_name, u.avatar, u.badge_blue, u.badge_gold, u.badge_rail, u.is_admin, u.name_color
+        query = `SELECT m.*, u.username, u.display_name, u.avatar, u.badge_blue, u.badge_gold, u.badge_rail, u.is_admin, u.name_color, u.chat_effect
                  FROM messages m JOIN users u ON u.id=m.user_id
                  WHERE m.channel_id=$1 ORDER BY m.created_at DESC LIMIT $2`;
         params = [req.params.channelId, limit];
