@@ -20,7 +20,7 @@ function initSocket() {
     const container = document.getElementById('messages-container');
     const atBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 80;
     const lastMsg = container.querySelector('.message:last-child');
-    const lastUserId = lastMsg?.dataset?.userId;
+    const lastUserId = lastMsg?.dataset?.messageId ? lastMsg.dataset.userId : null;
     const grouped = lastUserId === msg.user_id;
     const el = renderMessage(msg, grouped);
     container.appendChild(el);

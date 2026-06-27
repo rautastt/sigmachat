@@ -399,6 +399,7 @@ function renderMessage(m, grouped = false) {
   const div = document.createElement('div');
   div.className = `message${grouped ? ' grouped' : ''}`;
   div.dataset.messageId = m.id;
+  div.dataset.userId = m.user_id;
   const nameStyle = m.name_color ? `style="color:${m.name_color}"` : '';
   const effectClass = m.chat_effect ? `effect-${m.chat_effect}` : '';
   const badges = badgesHtml(m);
@@ -759,7 +760,7 @@ async function showUserProfile(userId) {
     openModal(`
       <div class="profile-popup" style="margin:-28px">
         <div class="profile-popup-banner">${user.banner ? `<img src="${user.banner}" />` : ''}
-          <div class="profile-popup-avatar">${user.avatar ? `<img src="${user.avatar}" />` : `<div class="avatar-initial" style="height:100%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:24px">${user.username[0].toUpperCase()}</div>`}</div>
+          <div class="profile-popup-avatar">${user.avatar ? `<img src="${user.avatar}" />` : `<div class="avatar-initial" style="height:100%;display:flex;align-items:center;justify-content:center;font-size:48px">${(user.display_name||user.username||'U')[0].toUpperCase()}</div>`}
         </div>
         <div class="profile-popup-body">
           <div class="profile-popup-name" style="color:${user.name_color||'var(--text-primary)'}">${escHtml(user.display_name || user.username)}</div>
@@ -914,7 +915,7 @@ function loadSettingsPanel(panel, el) {
     appearance: `
       <div class="settings-section">
         <div class="settings-section-title">Theme</div>
-        <select id="s-theme" style="background:var(--bg-input);border:1px solid var(--border);border-radius:6px;padding:8px;color:var(--text-primary);width:100%" onchange="applyTheme(this.value)">
+        <select id="s-theme" style="background:var(--bg-input);border:1px solid var(--border);border-radius:6px;padding:8px;color:var(--text-primary);width:100%" onchange="saveTheme(this.value)">
           <option value="default" ${u.theme==='default'?'selected':''}>Default Dark</option>
           <option value="dark_matter" ${u.theme==='dark_matter'?'selected':''}>Dark Matter</option>
           <option value="sakura" ${u.theme==='sakura'?'selected':''}>Sakura</option>
@@ -927,6 +928,17 @@ function loadSettingsPanel(panel, el) {
 
 function applyTheme(theme) {
   document.body.className = `theme-${theme}`;
+}
+
+async function saveTheme(theme) {
+  try {
+    await post('/auth/update-profile', { theme });
+    State.currentUser.theme = theme;
+    applyTheme(theme);
+    toast('Theme saved!', 'success');
+  } catch (err) {
+    toast(err.message, 'error');
+  }
 }
 
 async function saveProfile() {

@@ -13,7 +13,7 @@ async function loadStore() {
         <strong>Your points:</strong> <span style="color:var(--gold)">${u.points} pts</span>
       </div>
       <div class="store-categories">
-        ${categories.map(c => `<button class="store-cat-btn${c==='all'?' active':''}" onclick="filterStore('${c}',this)">${c==='all'?'All':c.replace('_',' ').replace(/\b\w/g,l=>l.toUpperCase())}</button>`).join('')}
+        ${categories.map(c => `<button class="store-cat-btn${c==='all'?' active':''} onclick="filterStore('${c}',this)">${c==='all'?'All':c.replace('_',' ').replace(/\b\w/g,l=>l.toUpperCase())}</button>`).join('')}
       </div>
       <div class="store-grid" id="store-grid">
         ${items.map(item => storeItemHtml(item)).join('')}
@@ -27,7 +27,7 @@ async function loadStore() {
 function storeItemHtml(item) {
   const icons = { rail: '⚡', name_color: '🎨', chat_effect: '✨', theme: '🎭' };
   return `
-    <div class="store-item" data-type="${item.type}">
+    <div class="store-item" data-type="${item.type}" data-item-id="${item.id}">
       <div class="store-item-icon">${icons[item.type] || '📦'}</div>
       <div class="store-item-name">${escHtml(item.name)}</div>
       <div class="store-item-desc">${escHtml(item.description)}</div>
@@ -58,10 +58,10 @@ async function buyItem(itemId, name, price) {
     toast(`Purchased ${name}!`, 'success');
     State.currentUser.points = newPoints;
     updateProfileBar();
-    loadStore();
-    // Refresh user data
+    // Refresh user data to get purchased items
     const { user } = await get('/auth/me');
     State.currentUser = user;
+    loadStore();
   } catch (err) {
     toast(err.message, 'error');
   }
