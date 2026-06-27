@@ -4,7 +4,7 @@ const router = express.Router();
 const bcrypt = require('bcryptjs');
 const { body, validationResult } = require('express-validator');
 const { generateToken, generateInviteCode, calcLevel } = require('../utils/helpers');
-const { sendVerificationEmail, sendPasswordResetEmail, sendEmailChangeVerification } = require('../utils/email');
+
 const { authLimiter } = require('../middleware/ratelimit');
 const { requireAuth } = require('../middleware/auth');
 const upload = require('../middleware/upload');
@@ -14,7 +14,7 @@ module.exports = (db) => {
   // Register
   router.post('/register', authLimiter, [
     body('username').trim().isLength({ min: 2, max: 32 }).matches(/^[a-zA-Z0-9_.-]+$/),
-    body('email').isEmail(),
+    body('email').isString(),
     body('password').isLength({ min: 6, max: 128 }),
   ], async (req, res) => {
     const errors = validationResult(req);
@@ -30,17 +30,13 @@ module.exports = (db) => {
       if (exists.rows.length > 0) return res.status(409).json({ error: 'Username or email already in use.' });
 
       const hash = await bcrypt.hash(password, 12);
-      const token = generateToken();
-      const expires = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
       const result = await db.query(
-        `INSERT INTO users (username, display_name, email, password_hash, verification_token, verification_token_expires)
-         VALUES ($1,$2,$3,$4,$5,$6) RETURNING id, username, email, is_admin, email_verified`,
-        [username, username, email, hash, token, expires]
+        `INSERT INTO users (username, display_name, email, password_hash, email_verified)
+         VALUES ($1,$2,$3,$4,TRUE) RETURNING id, username, email, is_admin, email_verified`,
+        [username, username, email, hash]
       );
       const user = result.rows[0];
-
-      try { await sendVerificationEmail(email, username, token); } catch (_) {}
 
       req.session.userId = user.id;
       req.session.username = user.username;
@@ -143,10 +139,6 @@ module.exports = (db) => {
       const result = await db.query('SELECT username, email, email_verified FROM users WHERE id=$1', [req.session.userId]);
       const user = result.rows[0];
       if (user.email_verified) return res.status(400).json({ error: 'Email already verified.' });
-      const token = generateToken();
-      const expires = new Date(Date.now() + 24 * 60 * 60 * 1000);
-      await db.query('UPDATE users SET verification_token=$1, verification_token_expires=$2 WHERE id=$3', [token, expires, req.session.userId]);
-      await sendVerificationEmail(user.email, user.username, token);
       res.json({ success: true });
     } catch (err) {
       res.status(500).json({ error: 'Failed to resend.' });
@@ -155,16 +147,9 @@ module.exports = (db) => {
 
   // Forgot password
   router.post('/forgot-password', authLimiter, [
-    body('email').isEmail(),
+    body('email').isString(),
   ], async (req, res) => {
     try {
-      const result = await db.query('SELECT id, username, email FROM users WHERE email=$1', [req.body.email]);
-      if (result.rows.length === 0) return res.json({ success: true }); // don't leak
-      const user = result.rows[0];
-      const token = generateToken();
-      const expires = new Date(Date.now() + 60 * 60 * 1000);
-      await db.query('UPDATE users SET reset_token=$1, reset_token_expires=$2 WHERE id=$3', [token, expires, user.id]);
-      await sendPasswordResetEmail(user.email, user.username, token);
       res.json({ success: true });
     } catch (err) {
       res.status(500).json({ error: 'Failed.' });
@@ -209,7 +194,7 @@ module.exports = (db) => {
 
   // Change email
   router.post('/change-email', requireAuth, [
-    body('email').isEmail(),
+    body('email').isString(),
     body('password').notEmpty(),
   ], async (req, res) => {
     try {
@@ -218,12 +203,8 @@ module.exports = (db) => {
       if (!match) return res.status(401).json({ error: 'Password is incorrect.' });
       const exists = await db.query('SELECT id FROM users WHERE email=$1 AND id!=$2', [req.body.email, req.session.userId]);
       if (exists.rows.length > 0) return res.status(409).json({ error: 'Email already in use.' });
-      const token = generateToken();
-      const expires = new Date(Date.now() + 24 * 60 * 60 * 1000);
-      await db.query('UPDATE users SET email=$1, email_verified=FALSE, verification_token=$2, verification_token_expires=$3 WHERE id=$4',
-        [req.body.email, token, expires, req.session.userId]);
-      req.session.emailVerified = false;
-      await sendEmailChangeVerification(req.body.email, result.rows[0].username, token);
+      await db.query('UPDATE users SET email=$1, email_verified=TRUE WHERE id=$2',
+        [req.body.email, req.session.userId]);
       res.json({ success: true });
     } catch (err) {
       res.status(500).json({ error: 'Failed.' });
