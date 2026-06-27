@@ -228,21 +228,25 @@ module.exports = (db) => {
     }
   });
 
-  // Update profile
+  // Update profile (handles bio, display_name, custom_status, status, theme, name_color, chat_effect)
   router.post('/update-profile', requireAuth, [
     body('bio').optional().isLength({ max: 500 }),
     body('display_name').optional().trim().isLength({ max: 64 }),
     body('custom_status').optional().isLength({ max: 128 }),
     body('status').optional().isIn(['online', 'idle', 'dnd', 'invisible']),
+    body('theme').optional().isIn(['default', 'dark_matter', 'sakura']),
+    body('name_color').optional().matches(/^#[0-9a-fA-F]{6}$/),
+    body('chat_effect').optional().isLength({ max: 50 }),
   ], async (req, res) => {
     try {
-      const { bio, display_name, custom_status, status } = req.body;
+      const { bio, display_name, custom_status, status, theme, name_color, chat_effect } = req.body;
       await db.query(
-        'UPDATE users SET bio=$1, display_name=$2, custom_status=$3, status=$4 WHERE id=$5',
-        [bio || '', display_name || req.session.username, custom_status || '', status || 'online', req.session.userId]
+        'UPDATE users SET bio=$1, display_name=$2, custom_status=$3, status=$4, theme=$5, name_color=$6, chat_effect=$7 WHERE id=$8',
+        [bio || '', display_name || req.session.username, custom_status || '', status || 'online', theme || 'default', name_color || null, chat_effect || null, req.session.userId]
       );
       res.json({ success: true });
     } catch (err) {
+      console.error(err);
       res.status(500).json({ error: 'Failed.' });
     }
   });
