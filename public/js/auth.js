@@ -14,6 +14,25 @@ document.querySelectorAll('.auth-tab').forEach(tab => {
   tab.addEventListener('click', () => showAuthTab(tab.dataset.tab));
 });
 
+// Check for verification or reset token in URL
+window.addEventListener('load', () => {
+  const params = new URLSearchParams(window.location.search);
+  const verifyToken = params.get('verify');
+  const resetToken = params.get('reset');
+
+  if (verifyToken) {
+    showAuthTab('verify');
+    document.getElementById('verify-token').value = verifyToken;
+    document.getElementById('auth-screen').classList.remove('hidden');
+    document.getElementById('app').classList.add('hidden');
+  } else if (resetToken) {
+    showAuthTab('reset');
+    document.getElementById('reset-token').value = resetToken;
+    document.getElementById('auth-screen').classList.remove('hidden');
+    document.getElementById('app').classList.add('hidden');
+  }
+});
+
 // Login
 document.getElementById('login-form').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -61,6 +80,27 @@ document.getElementById('forgot-form').addEventListener('submit', async (e) => {
   }
 });
 
+// Verify email (from link in email)
+if (document.getElementById('verify-form')) {
+  document.getElementById('verify-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const errEl = document.getElementById('verify-error');
+    const succEl = document.getElementById('verify-success');
+    errEl.textContent = ''; succEl.textContent = '';
+    try {
+      await post('/auth/verify-email', {
+        token: document.getElementById('verify-token').value,
+      });
+      succEl.textContent = 'Email verified successfully! Redirecting...';
+      setTimeout(() => {
+        window.location.href = '/?verified=true';
+      }, 2000);
+    } catch (err) {
+      errEl.textContent = err.message;
+    }
+  });
+}
+
 // Reset password
 document.getElementById('reset-form').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -78,3 +118,16 @@ document.getElementById('reset-form').addEventListener('submit', async (e) => {
     errEl.textContent = err.message;
   }
 });
+
+// Resend verification
+async function resendVerification() {
+  try {
+    await post('/auth/resend-verification', {});
+    const banner = document.getElementById('verified-banner');
+    banner.querySelector('span').textContent = '📧 Verification email resent! Check your inbox.';
+    banner.classList.remove('hidden');
+    setTimeout(() => banner.classList.add('hidden'), 5000);
+  } catch (err) {
+    alert('Failed to resend: ' + err.message);
+  }
+}

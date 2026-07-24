@@ -1,4 +1,5 @@
 'use strict';
+
 const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcryptjs');
@@ -8,25 +9,44 @@ const { sendVerificationEmail, sendPasswordResetEmail, sendEmailChangeVerificati
 
 const { authLimiter } = require('../middleware/ratelimit');
 const { requireAuth } = require('../middleware/auth');
-const upload = require('../middleware/upload');
 
 module.exports = (db) => {
-
-  // Register
-  router.post('/register', authLimiter, [
-    body('username').trim().isLength({ min: 2, max: 32 }).matches(/^[a-zA-Z0-9_.-]+$/),
-    body('email').isString(),
-    body('password').isLength({ min: 6, max: 128 }),
+  // ===== LOGIN =====
+  router.post('/login', authLimiter, [
+    body('username').isString(),
+    body('password').isString(),
   ], async (req, res) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) return res.status(400).json({ error: errors.array()[0].msg });
-
-    const { username, email, password } = req.body;
     try {
-      // Check ban
-      const ban = await db.query('SELECT id FROM bans WHERE (email=$1) AND unbanned=FALSE', [email]);
-      if (ban.rows.length > 0) return res.status(403).json({ error: 'This account is banned.' });
+      const result = await db.query(
+        'SELECT id, username, display_name, email, password_hash, email_verified, is_admin FROM users WHERE (username=$1 OR email=$1) AND is_banned=FALSE',
+        [req.body.username]
+      );
+      if (result.rows.length === 0) return res.status(401).json({ error: 'Invalid credentials' });
+      const user = result.rows[0];
+      const match = await bcrypt.compare(req.body.password, user.password_hash);
+      if (!match) return res.status(401).json({ error: 'Invalid credentials' });
+      req.session.userId = user.id;
+      req.session.username = user.username;
+      req.session.displayName = user.display_name;
+      req.session.isAdmin = user.is_admin;
+      req.session.emailVerified = user.email_verified;
+      res.json({ success: true, user: { id: user.id, username: user.username, emailVerified: user.email_verified } });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: 'Login failed' });
+    }
+  });
 
+  // ===== REGISTER =====
+  router.post('/register', authLimiter, [
+    body('username').isLength({ min: 3, max: 32 }).isAlphanumeric(),
+    body('email').isEmail(),
+    body('password').isLength({ min: 6 }),
+  ], async (req, res) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+      const { username, email, password } = req.body;
       const exists = await db.query('SELECT id FROM users WHERE username=$1 OR email=$2', [username, email]);
       if (exists.rows.length > 0) return res.status(409).json({ error: 'Username or email already in use.' });
 
@@ -42,6 +62,7 @@ module.exports = (db) => {
 
       req.session.userId = user.id;
       req.session.username = user.username;
+      req.session.displayName = user.username;
       req.session.isAdmin = user.is_admin;
       req.session.emailVerified = user.email_verified;
 
@@ -57,94 +78,35 @@ module.exports = (db) => {
       res.json({ success: true, user: { id: user.id, username: user.username, emailVerified: user.email_verified } });
     } catch (err) {
       console.error(err);
-      res.status(500).json({ error: 'Registration failed.' });
+      res.status(500).json({ error: 'Registration failed' });
     }
   });
 
-  // Login
-  router.post('/login', authLimiter, [
-    body('username').trim().notEmpty(),
-    body('password').notEmpty(),
+  // ===== VERIFY EMAIL =====
+  router.post('/verify-email', requireAuth, [
+    body('token').isString(),
   ], async (req, res) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) return res.status(400).json({ error: 'Invalid input.' });
-
-    const { username, password } = req.body;
     try {
+      const { token } = req.body;
       const result = await db.query(
-        'SELECT * FROM users WHERE (username=$1 OR email=$1)',
-        [username]
+        'SELECT id, email FROM users WHERE id=$1 AND verification_token=$2 AND verification_token_expires > NOW()',
+        [req.session.userId, token]
       );
-      if (result.rows.length === 0) return res.status(401).json({ error: 'Invalid credentials.' });
-      const user = result.rows[0];
+      if (result.rows.length === 0) return res.status(400).json({ error: 'Invalid or expired token.' });
 
-      if (user.is_banned) return res.status(403).json({ error: 'Your account has been banned.' });
-
-      const match = await bcrypt.compare(password, user.password_hash);
-      if (!match) return res.status(401).json({ error: 'Invalid credentials.' });
-
-      await db.query('UPDATE users SET last_seen=NOW(), status=$1 WHERE id=$2', ['online', user.id]);
-
-      req.session.userId = user.id;
-      req.session.username = user.username;
-      req.session.isAdmin = user.is_admin;
-      req.session.emailVerified = user.email_verified;
-
-      const { password_hash, verification_token, reset_token, ...safe } = user;
-      res.json({ success: true, user: safe });
-    } catch (err) {
-      console.error(err);
-      res.status(500).json({ error: 'Login failed.' });
-    }
-  });
-
-  // Logout
-  router.post('/logout', (req, res) => {
-    req.session.destroy(() => {
-      res.clearCookie('connect.sid');
-      res.json({ success: true });
-    });
-  });
-
-  // Me
-  router.get('/me', requireAuth, async (req, res) => {
-    try {
-      const result = await db.query(
-        `SELECT id, username, display_name, email, avatar, banner, bio, status, custom_status,
-                email_verified, is_admin, badge_blue, badge_gold, badge_rail, xp, level, points,
-                name_color, chat_effect, theme, created_at, last_seen
-         FROM users WHERE id=$1`,
-        [req.session.userId]
-      );
-      if (result.rows.length === 0) return res.status(404).json({ error: 'User not found.' });
-      res.json({ user: result.rows[0] });
-    } catch (err) {
-      res.status(500).json({ error: 'Failed to fetch user.' });
-    }
-  });
-
-  // Verify email
-  router.get('/verify-email', async (req, res) => {
-    const { token } = req.query;
-    if (!token) return res.status(400).send('Invalid token.');
-    try {
-      const result = await db.query(
-        'SELECT id FROM users WHERE verification_token=$1 AND verification_token_expires > NOW()',
-        [token]
-      );
-      if (result.rows.length === 0) return res.status(400).send('Token invalid or expired.');
       await db.query(
         'UPDATE users SET email_verified=TRUE, verified_at=NOW(), verification_token=NULL, verification_token_expires=NULL WHERE id=$1',
-        [result.rows[0].id]
+        [req.session.userId]
       );
-      if (req.session.userId === result.rows[0].id) req.session.emailVerified = true;
-      res.redirect('/?verified=1');
+      req.session.emailVerified = true;
+      res.json({ success: true });
     } catch (err) {
-      res.status(500).send('Verification failed.');
+      console.error(err);
+      res.status(500).json({ error: 'Verification failed.' });
     }
   });
 
-  // Resend verification
+  // ===== RESEND VERIFICATION =====
   router.post('/resend-verification', requireAuth, async (req, res) => {
     try {
       const result = await db.query('SELECT username, email, email_verified FROM users WHERE id=$1', [req.session.userId]);
@@ -173,7 +135,7 @@ module.exports = (db) => {
     }
   });
 
-  // Forgot password
+  // ===== FORGOT PASSWORD =====
   router.post('/forgot-password', authLimiter, [
     body('email').isString(),
   ], async (req, res) => {
@@ -207,17 +169,17 @@ module.exports = (db) => {
     }
   });
 
-  // Reset password
-  router.post('/reset-password', authLimiter, [
-    body('token').notEmpty(),
-    body('password').isLength({ min: 6, max: 128 }),
+  // ===== RESET PASSWORD =====
+  router.post('/reset-password', [
+    body('token').isString(),
+    body('password').isLength({ min: 6 }),
   ], async (req, res) => {
     try {
       const result = await db.query(
         'SELECT id FROM users WHERE reset_token=$1 AND reset_token_expires > NOW()',
         [req.body.token]
       );
-      if (result.rows.length === 0) return res.status(400).json({ error: 'Token invalid or expired.' });
+      if (result.rows.length === 0) return res.status(400).json({ error: 'Invalid or expired token.' });
       const hash = await bcrypt.hash(req.body.password, 12);
       await db.query('UPDATE users SET password_hash=$1, reset_token=NULL, reset_token_expires=NULL WHERE id=$2', [hash, result.rows[0].id]);
       res.json({ success: true });
@@ -227,13 +189,14 @@ module.exports = (db) => {
     }
   });
 
-  // Change password
+  // ===== CHANGE PASSWORD =====
   router.post('/change-password', requireAuth, [
-    body('currentPassword').notEmpty(),
-    body('newPassword').isLength({ min: 6, max: 128 }),
+    body('currentPassword').isString(),
+    body('newPassword').isLength({ min: 6 }),
   ], async (req, res) => {
     try {
       const result = await db.query('SELECT password_hash FROM users WHERE id=$1', [req.session.userId]);
+      if (result.rows.length === 0) return res.status(401).json({ error: 'User not found' });
       const match = await bcrypt.compare(req.body.currentPassword, result.rows[0].password_hash);
       if (!match) return res.status(401).json({ error: 'Current password is incorrect.' });
       const hash = await bcrypt.hash(req.body.newPassword, 12);
@@ -245,13 +208,14 @@ module.exports = (db) => {
     }
   });
 
-  // Change email
+  // ===== CHANGE EMAIL =====
   router.post('/change-email', requireAuth, [
-    body('email').isString(),
-    body('password').notEmpty(),
+    body('email').isEmail(),
+    body('password').isString(),
   ], async (req, res) => {
     try {
       const result = await db.query('SELECT password_hash, username FROM users WHERE id=$1', [req.session.userId]);
+      if (!result.rows[0]) return res.status(401).json({ error: 'User not found' });
       const match = await bcrypt.compare(req.body.password, result.rows[0].password_hash);
       if (!match) return res.status(401).json({ error: 'Password is incorrect.' });
       const exists = await db.query('SELECT id FROM users WHERE email=$1 AND id!=$2', [req.body.email, req.session.userId]);
@@ -279,17 +243,16 @@ module.exports = (db) => {
     }
   });
 
-  // Change username
+  // ===== CHANGE USERNAME =====
   router.post('/change-username', requireAuth, [
-    body('username').trim().isLength({ min: 2, max: 32 }).matches(/^[a-zA-Z0-9_.-]+$/),
+    body('username').isLength({ min: 3, max: 32 }).isAlphanumeric(),
   ], async (req, res) => {
     try {
-      const verified = await db.query('SELECT email_verified FROM users WHERE id=$1', [req.session.userId]);
-      if (!verified.rows[0].email_verified) return res.status(403).json({ error: 'Email must be verified to change username.' });
       const exists = await db.query('SELECT id FROM users WHERE username=$1 AND id!=$2', [req.body.username, req.session.userId]);
-      if (exists.rows.length > 0) return res.status(409).json({ error: 'Username taken.' });
-      await db.query('UPDATE users SET username=$1 WHERE id=$2', [req.body.username, req.session.userId]);
+      if (exists.rows.length > 0) return res.status(409).json({ error: 'Username already in use.' });
+      await db.query('UPDATE users SET username=$1, display_name=$1 WHERE id=$2', [req.body.username, req.session.userId]);
       req.session.username = req.body.username;
+      req.session.displayName = req.body.username;
       res.json({ success: true });
     } catch (err) {
       console.error(err);
@@ -297,49 +260,22 @@ module.exports = (db) => {
     }
   });
 
-  // Update profile (handles bio, display_name, custom_status, status, theme, name_color, chat_effect)
-  router.post('/update-profile', requireAuth, [
-    body('bio').optional().isLength({ max: 500 }),
-    body('display_name').optional().trim().isLength({ max: 64 }),
-    body('custom_status').optional().isLength({ max: 128 }),
-    body('status').optional().isIn(['online', 'idle', 'dnd', 'invisible']),
-    body('theme').optional().isIn(['default', 'dark_matter', 'sakura']),
-    body('name_color').optional().matches(/^#[0-9a-fA-F]{6}$/),
-    body('chat_effect').optional().isLength({ max: 50 }),
-  ], async (req, res) => {
+  // ===== GET PROFILE =====
+  router.get('/profile', requireAuth, async (req, res) => {
     try {
-      const { bio, display_name, custom_status, status, theme, name_color, chat_effect } = req.body;
-      await db.query(
-        'UPDATE users SET bio=$1, display_name=$2, custom_status=$3, status=$4, theme=$5, name_color=$6, chat_effect=$7 WHERE id=$8',
-        [bio || '', display_name || req.session.username, custom_status || '', status || 'online', theme || 'default', name_color || null, chat_effect || null, req.session.userId]
-      );
-      res.json({ success: true });
+      const result = await db.query('SELECT id, username, display_name, email, email_verified, avatar, banner, bio, status, created_at FROM users WHERE id=$1', [req.session.userId]);
+      if (result.rows.length === 0) return res.status(404).json({ error: 'User not found' });
+      res.json(result.rows[0]);
     } catch (err) {
       console.error(err);
-      res.status(500).json({ error: 'Failed.' });
+      res.status(500).json({ error: 'Failed to fetch profile' });
     }
   });
 
-  // Upload avatar
-  router.post('/upload-avatar', requireAuth, upload.single('avatar'), async (req, res) => {
-    if (!req.file) return res.status(400).json({ error: 'No file uploaded.' });
-    const url = `/uploads/avatars/${req.file.filename}`;
-    await db.query('UPDATE users SET avatar=$1 WHERE id=$2', [url, req.session.userId]);
-    res.json({ success: true, url });
-  });
-
-  // Upload banner
-  router.post('/upload-banner', requireAuth, upload.single('banner'), async (req, res) => {
-    if (!req.file) return res.status(400).json({ error: 'No file uploaded.' });
-    const url = `/uploads/banners/${req.file.filename}`;
-    await db.query('UPDATE users SET banner=$1 WHERE id=$2', [url, req.session.userId]);
-    res.json({ success: true, url });
-  });
-
-  // Logout all devices (destroy all sessions)
-  router.post('/logout-all', requireAuth, async (req, res) => {
+  // ===== LOGOUT =====
+  router.post('/logout', (req, res) => {
     try {
-      await db.query('DELETE FROM session WHERE sess::jsonb->\'userId\' = to_jsonb($1::text)', [req.session.userId]);
+      db.query('DELETE FROM session WHERE sess::jsonb->\'userId\' = to_jsonb($1::text)', [req.session.userId]);
       req.session.destroy(() => res.json({ success: true }));
     } catch (err) {
       console.error(err);
@@ -349,4 +285,3 @@ module.exports = (db) => {
 
   return router;
 };
-
