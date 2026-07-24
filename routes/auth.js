@@ -4,6 +4,7 @@ const router = express.Router();
 const bcrypt = require('bcryptjs');
 const { body, validationResult } = require('express-validator');
 const { generateToken, generateInviteCode, calcLevel } = require('../utils/helpers');
+const { sendVerificationEmail, sendPasswordResetEmail, sendEmailChangeVerification } = require('../utils/email');
 
 const { authLimiter } = require('../middleware/ratelimit');
 const { requireAuth } = require('../middleware/auth');
@@ -30,11 +31,12 @@ module.exports = (db) => {
       if (exists.rows.length > 0) return res.status(409).json({ error: 'Username or email already in use.' });
 
       const hash = await bcrypt.hash(password, 12);
+      const verificationToken = generateToken();
 
       const result = await db.query(
-        `INSERT INTO users (username, display_name, email, password_hash, email_verified)
-         VALUES ($1,$2,$3,$4,TRUE) RETURNING id, username, email, is_admin, email_verified`,
-        [username, username, email, hash]
+        `INSERT INTO users (username, display_name, email, password_hash, email_verified, verification_token, verification_token_expires)
+         VALUES ($1,$2,$3,$4,FALSE,$5,NOW() + INTERVAL '24 hours') RETURNING id, username, email, is_admin, email_verified`,
+        [username, username, email, hash, verificationToken]
       );
       const user = result.rows[0];
 
@@ -42,6 +44,15 @@ module.exports = (db) => {
       req.session.username = user.username;
       req.session.isAdmin = user.is_admin;
       req.session.emailVerified = user.email_verified;
+
+      // Send verification email
+      try {
+        await sendVerificationEmail(email, username, verificationToken);
+        console.log('✅ Verification email sent to', email);
+      } catch (emailErr) {
+        console.error('⚠️ Failed to send verification email:', emailErr.message);
+        // Don't fail the registration if email fails
+      }
 
       res.json({ success: true, user: { id: user.id, username: user.username, emailVerified: user.email_verified } });
     } catch (err) {
@@ -139,8 +150,25 @@ module.exports = (db) => {
       const result = await db.query('SELECT username, email, email_verified FROM users WHERE id=$1', [req.session.userId]);
       const user = result.rows[0];
       if (user.email_verified) return res.status(400).json({ error: 'Email already verified.' });
+      
+      const verificationToken = generateToken();
+      await db.query(
+        'UPDATE users SET verification_token=$1, verification_token_expires=NOW() + INTERVAL \'24 hours\' WHERE id=$2',
+        [verificationToken, req.session.userId]
+      );
+
+      // Send verification email
+      try {
+        await sendVerificationEmail(user.email, user.username, verificationToken);
+        console.log('✅ Verification email resent to', user.email);
+      } catch (emailErr) {
+        console.error('⚠️ Failed to send verification email:', emailErr.message);
+        return res.status(500).json({ error: 'Failed to send email. Please try again.' });
+      }
+
       res.json({ success: true });
     } catch (err) {
+      console.error(err);
       res.status(500).json({ error: 'Failed to resend.' });
     }
   });
@@ -150,8 +178,31 @@ module.exports = (db) => {
     body('email').isString(),
   ], async (req, res) => {
     try {
+      const result = await db.query('SELECT id, username FROM users WHERE email=$1', [req.body.email]);
+      if (result.rows.length === 0) {
+        // Don't reveal if email exists
+        return res.json({ success: true });
+      }
+
+      const user = result.rows[0];
+      const resetToken = generateToken();
+      
+      await db.query(
+        'UPDATE users SET reset_token=$1, reset_token_expires=NOW() + INTERVAL \'1 hour\' WHERE id=$2',
+        [resetToken, user.id]
+      );
+
+      // Send reset email
+      try {
+        await sendPasswordResetEmail(req.body.email, user.username, resetToken);
+        console.log('✅ Password reset email sent to', req.body.email);
+      } catch (emailErr) {
+        console.error('⚠️ Failed to send reset email:', emailErr.message);
+      }
+
       res.json({ success: true });
     } catch (err) {
+      console.error(err);
       res.status(500).json({ error: 'Failed.' });
     }
   });
@@ -171,6 +222,7 @@ module.exports = (db) => {
       await db.query('UPDATE users SET password_hash=$1, reset_token=NULL, reset_token_expires=NULL WHERE id=$2', [hash, result.rows[0].id]);
       res.json({ success: true });
     } catch (err) {
+      console.error(err);
       res.status(500).json({ error: 'Reset failed.' });
     }
   });
@@ -188,6 +240,7 @@ module.exports = (db) => {
       await db.query('UPDATE users SET password_hash=$1 WHERE id=$2', [hash, req.session.userId]);
       res.json({ success: true });
     } catch (err) {
+      console.error(err);
       res.status(500).json({ error: 'Failed.' });
     }
   });
@@ -203,10 +256,25 @@ module.exports = (db) => {
       if (!match) return res.status(401).json({ error: 'Password is incorrect.' });
       const exists = await db.query('SELECT id FROM users WHERE email=$1 AND id!=$2', [req.body.email, req.session.userId]);
       if (exists.rows.length > 0) return res.status(409).json({ error: 'Email already in use.' });
-      await db.query('UPDATE users SET email=$1, email_verified=TRUE WHERE id=$2',
-        [req.body.email, req.session.userId]);
+      
+      const verificationToken = generateToken();
+      await db.query(
+        'UPDATE users SET email=$1, email_verified=FALSE, verification_token=$2, verification_token_expires=NOW() + INTERVAL \'24 hours\' WHERE id=$3',
+        [req.body.email, verificationToken, req.session.userId]
+      );
+
+      // Send verification email for new email
+      try {
+        await sendEmailChangeVerification(req.body.email, result.rows[0].username, verificationToken);
+        console.log('✅ Email change verification sent to', req.body.email);
+      } catch (emailErr) {
+        console.error('⚠️ Failed to send email change verification:', emailErr.message);
+        return res.status(500).json({ error: 'Failed to send verification email. Please try again.' });
+      }
+
       res.json({ success: true });
     } catch (err) {
+      console.error(err);
       res.status(500).json({ error: 'Failed.' });
     }
   });
@@ -224,6 +292,7 @@ module.exports = (db) => {
       req.session.username = req.body.username;
       res.json({ success: true });
     } catch (err) {
+      console.error(err);
       res.status(500).json({ error: 'Failed.' });
     }
   });
@@ -273,9 +342,11 @@ module.exports = (db) => {
       await db.query('DELETE FROM session WHERE sess::jsonb->\'userId\' = to_jsonb($1::text)', [req.session.userId]);
       req.session.destroy(() => res.json({ success: true }));
     } catch (err) {
+      console.error(err);
       res.status(500).json({ error: 'Failed.' });
     }
   });
 
   return router;
 };
+
