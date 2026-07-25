@@ -68,6 +68,18 @@
         <button type="submit" class="btn-primary btn-full">Send Reset Link</button>
       </form>
 
+      <!-- Email Verification (from link) -->
+      <form id="verify-form" class="auth-form">
+        <h3 style="margin-bottom:16px;color:var(--text-primary)">Verify Your Email</h3>
+        <input type="hidden" id="verify-token" />
+        <div class="field-group">
+          <p style="color:var(--text-secondary);margin-bottom:16px;">Click the button below to verify your email address.</p>
+        </div>
+        <div class="auth-error" id="verify-error"></div>
+        <div class="auth-success" id="verify-success"></div>
+        <button type="submit" class="btn-primary btn-full">Verify Email</button>
+      </form>
+
       <!-- Reset Password (shown via URL) -->
       <form id="reset-form" class="auth-form">
         <h3 style="margin-bottom:16px;color:var(--text-primary)">Reset Password</h3>
